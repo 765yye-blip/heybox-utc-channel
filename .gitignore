@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+
+# 不要提交任何含 token 的文件！
+*.env
+.env*
+
+# 本地运行产物
+*.log
