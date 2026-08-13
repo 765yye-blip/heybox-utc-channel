@@ -17,4 +17,4 @@ jobs:
           HEYBOX_TOKEN: ${{ secrets.HEYBOX_TOKEN }}
           ROOM_ID: ${{ vars.ROOM_ID }}
           CHANNEL_ID: ${{ vars.CHANNEL_ID }}
-        run: python3 utc_channel.py --loop
+        run: python3 -u utc_channel.py --loop
