@@ -1,0 +1,20 @@
+name: heychat-utc-channel
+
+on:
+  schedule:
+    - cron: "7 */6 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  update-utc-channel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 每分钟更新 UTC 频道名
+        env:
+          HEYBOX_TOKEN: ${{ secrets.HEYBOX_TOKEN }}
+          ROOM_ID: ${{ vars.ROOM_ID }}
+          CHANNEL_ID: ${{ vars.CHANNEL_ID }}
+        run: python3 -u utc_channel.py --loop

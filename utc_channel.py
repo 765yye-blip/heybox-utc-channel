@@ -21,6 +21,11 @@
     CHANNEL_ID     可选. 文字频道 ID。留空则尝试自动创建；自动创建失败时请手动创建后填入
     CHANNEL_PREFIX 可选. 频道名前缀，默认 "UTC"，最终频道名形如 "UTC 14:35"
     LOOP_MINUTES   可选. loop 模式运行分钟数，默认 350（必须小于 Actions job 的 6 小时上限）
+
+v2 改进：
+- 所有日志带 flush=True 实时输出，避免 GitHub Actions 管道块缓冲导致日志批量出现
+- 每次编辑后打印接口完整返回，便于发现"返回 ok 但实际未生效"的静默失败
+- loop 模式睡眠到下一个整分钟，减少因计时漂移跳分钟
 """
 
 import os
@@ -56,6 +61,12 @@ PREFIX = os.environ.get("CHANNEL_PREFIX", "UTC").strip()
 LOOP_MINUTES = int(os.environ.get("LOOP_MINUTES", "350"))
 
 
+def log(msg):
+    """实时刷新的日志输出：GitHub Actions 管道下 stdout 是块缓冲，
+    不加 flush 会导致日志批量堆积、看起来像脚本卡住。"""
+    print(msg, flush=True)
+
+
 def api(path, method="GET", body=None):
     """通用请求：token 放 header，固定 query 参数。返回解析后的 JSON。"""
     url = BASE_URL + path + "?" + urllib.parse.urlencode(QUERY)
@@ -74,7 +85,9 @@ def utc_now_hhmm():
 
 
 def edit_channel_name(room_id, channel_id, name):
-    """把频道名改成 name（POST /chatroom/v2/channel/edit）"""
+    """把频道名改成 name（POST /chatroom/v2/channel/edit）。
+    成功与否以接口 result 为准：有些情况下 status 可能返回 ok 但实际未生效，
+    因此把完整返回打印出来便于排查。"""
     body = {
         "room_id": str(room_id),
         "channel_id": str(channel_id),
@@ -82,6 +95,7 @@ def edit_channel_name(room_id, channel_id, name):
         "channel_type": 1,  # 1 = 文字频道
     }
     r = api(API_PATH_EDIT, "POST", body)
+    log(f"    接口返回: {json.dumps(r, ensure_ascii=False)}")
     if r.get("status") != "ok":
         raise RuntimeError(f"编辑频道名失败，接口返回: {r}")
     return r
@@ -109,38 +123,45 @@ def list_rooms():
     r = api(API_PATH_ROOMS, "GET")
     if r.get("status") != "ok":
         raise RuntimeError(f"获取房间列表失败，接口返回: {r}")
-    print("机器人已加入的房间（注意：真实 room_id 是 19 位数字，不是 6 位房间号）：")
-    print(f"{'room_id':<22} room_name")
-    print("-" * 70)
+    log("机器人已加入的房间（注意：真实 room_id 是 19 位数字，不是 6 位房间号）：")
+    log(f"{'room_id':<22} room_name")
+    log("-" * 70)
     rooms = ((r.get("result") or {}).get("rooms") or {}).get("rooms") or []
     for room in rooms:
-        print(f"{str(room.get('room_id', '')):<22} {room.get('room_name', '')}")
+        log(f"{str(room.get('room_id', '')):<22} {room.get('room_name', '')}")
     if not rooms:
-        print("（没有查到任何房间：请确认机器人已被邀请进房间、token 有效、有查看频道权限）")
+        log("（没有查到任何房间：请确认机器人已被邀请进房间、token 有效、有查看频道权限）")
 
 
 def ensure_channel():
     """确保 CHANNEL_ID 可用：已配置则直接返回；未配置则尝试自动创建。"""
     global CHANNEL_ID
     if CHANNEL_ID:
-        print(f"使用已配置的频道: {CHANNEL_ID}")
+        log(f"使用已配置的频道: {CHANNEL_ID}")
         return
-    print("未配置 CHANNEL_ID，尝试自动创建文字频道 ...")
+    log("未配置 CHANNEL_ID，尝试自动创建文字频道 ...")
     try:
         cid = create_channel(ROOM_ID, f"{PREFIX} {utc_now_hhmm()}")
         if cid:
             CHANNEL_ID = cid
-            print(f"自动创建成功！频道 ID: {cid}")
-            print("提示：请把该 ID 填到 GitHub Actions 的变量 CHANNEL_ID，避免每次重复创建。")
+            log(f"自动创建成功！频道 ID: {cid}")
+            log("提示：请把该 ID 填到 GitHub Actions 的变量 CHANNEL_ID，避免每次重复创建。")
             return
     except Exception as e:
-        print(f"自动创建失败: {e}")
-    print("=" * 70)
-    print("请手动完成：在黑盒语音客户端进入房间 -> 新建一个文字频道（名字随意）")
-    print("然后把频道的真实 ID 填入 GitHub Actions 变量 CHANNEL_ID，再重新触发运行。")
-    print("（若确定是接口路径问题，可在本脚本顶部 API_PATH_CREATE 处按官方文档修正）")
-    print("=" * 70)
+        log(f"自动创建失败: {e}")
+    log("=" * 70)
+    log("请手动完成：在黑盒语音客户端进入房间 -> 新建一个文字频道（名字随意）")
+    log("然后把频道的真实 ID 填入 GitHub Actions 变量 CHANNEL_ID，再重新触发运行。")
+    log("（若确定是接口路径问题，可在本脚本顶部 API_PATH_CREATE 处按官方文档修正）")
+    log("=" * 70)
     sys.exit(1)
+
+
+def sleep_to_next_minute():
+    """睡到下一个整分钟时刻，避免 sleep(60) 累积漂移导致跳过个别分钟"""
+    now = time.time()
+    delay = ((int(now) // 60) + 1) * 60 - now
+    time.sleep(delay)
 
 
 def run_once():
@@ -148,7 +169,7 @@ def run_once():
     ensure_channel()
     name = f"{PREFIX} {utc_now_hhmm()}"
     edit_channel_name(ROOM_ID, CHANNEL_ID, name)
-    print(f"[{utc_now_hhmm()}] 已更新频道名为: {name}")
+    log(f"[{utc_now_hhmm()}] 已更新频道名为: {name}")
 
 
 def run_loop():
@@ -162,17 +183,17 @@ def run_loop():
             name = f"{PREFIX} {now}"
             edit_channel_name(ROOM_ID, CHANNEL_ID, name)
             last = now
-            print(f"[{now}] 已更新频道名为: {name}")
-        time.sleep(60)
-    print(f"loop 模式已运行 {LOOP_MINUTES} 分钟，正常退出（等待 GitHub Actions 下一次调度唤醒）")
+            log(f"[{now}] 已更新频道名为: {name}")
+        sleep_to_next_minute()
+    log(f"loop 模式已运行 {LOOP_MINUTES} 分钟，正常退出（等待 GitHub Actions 下一次调度唤醒）")
 
 
 def main():
     if not TOKEN:
-        print("缺少环境变量 HEYBOX_TOKEN，请先在 GitHub 仓库 Secrets 中配置")
+        log("缺少环境变量 HEYBOX_TOKEN，请先在 GitHub 仓库 Secrets 中配置")
         sys.exit(1)
     if not ROOM_ID:
-        print("缺少环境变量 ROOM_ID，请先在 GitHub 仓库 Variables 中配置（19 位真实房间 ID）")
+        log("缺少环境变量 ROOM_ID，请先在 GitHub 仓库 Variables 中配置（19 位真实房间 ID）")
         sys.exit(1)
     arg = sys.argv[1] if len(sys.argv) > 1 else "--once"
     if arg == "--list-rooms":
