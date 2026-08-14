@@ -3,7 +3,8 @@
 """
 黑盒语音 · UTC 时间频道名自动更新机器人
 ========================================
-把房间里的一个文字频道的名称实时更新为当前 UTC 时间，格式：UTC HH:mm
+把房间里的一个文字频道的名称实时更新为当前 UTC 时间，格式：UTC h:mm AM/PM
+（如 "UTC 2:35 PM"）
 
 设计要点：
 - 零第三方依赖（只使用 Python 标准库 urllib），可直接跑在 GitHub Actions
@@ -19,7 +20,7 @@
     ROOM_ID        必填. 房间真实 ID（19 位数字）。注意：不是 6 位房间号！
                     用 --list-rooms 对照房间名查出真实 ID
     CHANNEL_ID     可选. 文字频道 ID。留空则尝试自动创建；自动创建失败时请手动创建后填入
-    CHANNEL_PREFIX 可选. 频道名前缀，默认 "UTC"，最终频道名形如 "UTC 14:35"
+    CHANNEL_PREFIX 可选. 频道名前缀，默认 "UTC"，最终频道名形如 "UTC 2:35 PM"
     LOOP_MINUTES   可选. loop 模式运行分钟数，默认 350（必须小于 Actions job 的 6 小时上限）
 
 v2 改进：
@@ -80,8 +81,9 @@ def api(path, method="GET", body=None):
 
 
 def utc_now_hhmm():
-    """当前 UTC 时间，格式 HH:mm（阿拉伯数字）"""
-    return datetime.now(timezone.utc).strftime("%H:%M")
+    """当前 UTC 时间，12 小时制带 AM/PM，如 "2:35 PM"。
+    用 lstrip("0") 去前导零（%-I 在 Windows 的 strftime 下不受支持）"""
+    return datetime.now(timezone.utc).strftime("%I:%M %p").lstrip("0")
 
 
 def edit_channel_name(room_id, channel_id, name):
