@@ -4,7 +4,7 @@
 黑盒语音 · UTC 时间频道名自动更新机器人
 ========================================
 把房间里的一个文字频道的名称实时更新为当前 UTC 时间，可同时显示美西时间，
-格式：UTC HH:mm PT HH:mm（如 "UTC 14:35 PT 07:35"）
+格式：UTC HH:mm · PT h:mm AM/PM（如 "UTC 14:35 · PT 7:35 AM"）
 
 设计要点：
 - 零第三方依赖（只使用 Python 标准库 urllib + zoneinfo），可直接跑在 GitHub
@@ -27,8 +27,9 @@
     LOOP_MINUTES   可选. loop 模式运行分钟数，默认 350（必须小于 Actions job 的 6 小时上限）
 
 v3 改进：
-- 频道名追加美西时间（America/Los_Angeles，自动处理夏令时），
-  形如 "UTC 14:35 PT 07:35"；可用 SHOW_PT=0 关闭
+- 频道名追加美西时间（America/Los_Angeles，自动处理夏令时），美西用 12 小时制
+  AM/PM 便于分早晚，两段用 · 分隔，形如 "UTC 14:35 · PT 7:35 AM"；
+  可用 SHOW_PT=0 关闭
 v2 改进：
 - 所有日志带 flush=True 实时输出，避免 GitHub Actions 管道块缓冲导致日志批量出现
 - 每次编辑后打印接口完整返回，便于发现"返回 ok 但实际未生效"的静默失败
@@ -105,15 +106,18 @@ def utc_now_hhmm():
 
 
 def pt_now_hhmm():
-    """当前美西时间（America/Los_Angeles，自动处理夏令时），格式 HH:mm"""
-    return datetime.now(PT_TZ).strftime("%H:%M")
+    """当前美西时间（America/Los_Angeles，自动处理夏令时）。
+    美西本地习惯用 12 小时制 + AM/PM，一眼可分早晚，如 "3:53 AM"。
+    用 lstrip("0") 去前导零（%-I 在 Windows 的 strftime 下不受支持）"""
+    return datetime.now(PT_TZ).strftime("%I:%M %p").lstrip("0")
 
 
 def channel_name():
-    """生成频道名：UTC HH:mm，可选追加美西时间 PT HH:mm"""
+    """生成频道名：UTC HH:mm，可选追加美西时间 PT h:mm AM/PM，
+    两段用 · 分隔，形如 "UTC 10:53 · PT 3:53 AM" """
     utc = utc_now_hhmm()
     if SHOW_PT and PT_OK:
-        return f"{PREFIX} {utc} PT {pt_now_hhmm()}"
+        return f"{PREFIX} {utc} · PT {pt_now_hhmm()}"
     return f"{PREFIX} {utc}"
 
 
