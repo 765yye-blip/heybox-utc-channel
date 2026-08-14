@@ -3,14 +3,11 @@
 """
 黑盒语音 · UTC 时间频道名自动更新机器人
 ========================================
-把房间里的一个文字频道的名称实时更新为当前 UTC 时间，可同时显示美西时间，
-格式：UTC HH:mm · PT h:mm AM/PM（如 "UTC 14:35 · PT 7:35 AM"）
+把房间里的一个文字频道的名称实时更新为当前 UTC 时间，格式：UTC HH:mm
 
 设计要点：
-- 零第三方依赖（只使用 Python 标准库 urllib + zoneinfo），可直接跑在 GitHub
-  Actions 的 ubuntu-latest 上（自带 python3，zoneinfo 需要 Python 3.9+）。
-- 美西时间用 zoneinfo 的 America/Los_Angeles 时区，自动处理夏令时
-  （PDT=UTC-7 / PST=UTC-8），不写死固定偏移。
+- 零第三方依赖（只使用 Python 标准库 urllib），可直接跑在 GitHub Actions
+  的 ubuntu-latest 上（自带 python3）。
 - 三种运行模式：
     * --once       ：更新一次后退出（配合 GitHub Actions cron 每 5 分钟触发）
     * --loop       ：每分钟更新，持续 LOOP_MINUTES 分钟后自行退出
@@ -23,13 +20,8 @@
                     用 --list-rooms 对照房间名查出真实 ID
     CHANNEL_ID     可选. 文字频道 ID。留空则尝试自动创建；自动创建失败时请手动创建后填入
     CHANNEL_PREFIX 可选. 频道名前缀，默认 "UTC"，最终频道名形如 "UTC 14:35"
-    SHOW_PT        可选. 是否在 UTC 后追加美西时间（默认显示），置 "0" 关闭
     LOOP_MINUTES   可选. loop 模式运行分钟数，默认 350（必须小于 Actions job 的 6 小时上限）
 
-v3 改进：
-- 频道名追加美西时间（America/Los_Angeles，自动处理夏令时），美西用 12 小时制
-  AM/PM 便于分早晚，两段用 · 分隔，形如 "UTC 14:35 · PT 7:35 AM"；
-  可用 SHOW_PT=0 关闭
 v2 改进：
 - 所有日志带 flush=True 实时输出，避免 GitHub Actions 管道块缓冲导致日志批量出现
 - 每次编辑后打印接口完整返回，便于发现"返回 ok 但实际未生效"的静默失败
@@ -43,18 +35,6 @@ import time
 import urllib.request
 import urllib.parse
 from datetime import datetime, timezone
-
-# 美西时区（America/Los_Angeles）：zoneinfo 为标准库（Python 3.9+），
-# 会自动处理夏令时（PDT=UTC-7 / PST=UTC-8）。
-# Windows 本地可能缺少系统 tzdata 而失败，此时回退为只显示 UTC（打印警告）。
-try:
-    from zoneinfo import ZoneInfo
-    PT_TZ = ZoneInfo("America/Los_Angeles")
-    PT_OK = True
-except Exception as e:
-    PT_TZ = None
-    PT_OK = False
-    PT_ERR = e
 
 BASE_URL = "https://chat.xiaoheihe.cn"
 
@@ -79,7 +59,6 @@ ROOM_ID = os.environ.get("ROOM_ID", "").strip()
 CHANNEL_ID = os.environ.get("CHANNEL_ID", "").strip()
 PREFIX = os.environ.get("CHANNEL_PREFIX", "UTC").strip()
 LOOP_MINUTES = int(os.environ.get("LOOP_MINUTES", "350"))
-SHOW_PT = os.environ.get("SHOW_PT", "1").strip() not in ("", "0", "false", "False")
 
 
 def log(msg):
@@ -103,22 +82,6 @@ def api(path, method="GET", body=None):
 def utc_now_hhmm():
     """当前 UTC 时间，格式 HH:mm（阿拉伯数字）"""
     return datetime.now(timezone.utc).strftime("%H:%M")
-
-
-def pt_now_hhmm():
-    """当前美西时间（America/Los_Angeles，自动处理夏令时）。
-    美西本地习惯用 12 小时制 + AM/PM，一眼可分早晚，如 "3:53 AM"。
-    用 lstrip("0") 去前导零（%-I 在 Windows 的 strftime 下不受支持）"""
-    return datetime.now(PT_TZ).strftime("%I:%M %p").lstrip("0")
-
-
-def channel_name():
-    """生成频道名：UTC HH:mm，可选追加美西时间 PT h:mm AM/PM，
-    两段用 · 分隔，形如 "UTC 10:53 · PT 3:53 AM" """
-    utc = utc_now_hhmm()
-    if SHOW_PT and PT_OK:
-        return f"{PREFIX} {utc} · PT {pt_now_hhmm()}"
-    return f"{PREFIX} {utc}"
 
 
 def edit_channel_name(room_id, channel_id, name):
@@ -178,7 +141,7 @@ def ensure_channel():
         return
     log("未配置 CHANNEL_ID，尝试自动创建文字频道 ...")
     try:
-        cid = create_channel(ROOM_ID, channel_name())
+        cid = create_channel(ROOM_ID, f"{PREFIX} {utc_now_hhmm()}")
         if cid:
             CHANNEL_ID = cid
             log(f"自动创建成功！频道 ID: {cid}")
@@ -204,7 +167,7 @@ def sleep_to_next_minute():
 def run_once():
     """单次更新（供 cron 每 5 分钟触发）"""
     ensure_channel()
-    name = channel_name()
+    name = f"{PREFIX} {utc_now_hhmm()}"
     edit_channel_name(ROOM_ID, CHANNEL_ID, name)
     log(f"[{utc_now_hhmm()}] 已更新频道名为: {name}")
 
@@ -215,11 +178,12 @@ def run_loop():
     deadline = time.time() + LOOP_MINUTES * 60
     last = None
     while time.time() < deadline:
-        now = channel_name()
+        now = utc_now_hhmm()
         if now != last:  # 分钟变化了才调接口，减少无效请求
-            edit_channel_name(ROOM_ID, CHANNEL_ID, now)
+            name = f"{PREFIX} {now}"
+            edit_channel_name(ROOM_ID, CHANNEL_ID, name)
             last = now
-            log(f"[{utc_now_hhmm()}] 已更新频道名为: {now}")
+            log(f"[{now}] 已更新频道名为: {name}")
         sleep_to_next_minute()
     log(f"loop 模式已运行 {LOOP_MINUTES} 分钟，正常退出（等待 GitHub Actions 下一次调度唤醒）")
 
@@ -231,9 +195,6 @@ def main():
     if not ROOM_ID:
         log("缺少环境变量 ROOM_ID，请先在 GitHub 仓库 Variables 中配置（19 位真实房间 ID）")
         sys.exit(1)
-    if SHOW_PT and not PT_OK:
-        log(f"警告: 无法加载美西时区（{PT_ERR}），本次只显示 UTC。"
-            f"GitHub Actions 的 ubuntu 环境无此问题，仅 Windows 本地可能缺少 tzdata。")
     arg = sys.argv[1] if len(sys.argv) > 1 else "--once"
     if arg == "--list-rooms":
         list_rooms()
