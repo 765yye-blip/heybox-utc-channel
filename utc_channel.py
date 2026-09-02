@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-黑盒语音 · 美西洛杉矶时间频道名自动更新机器人
-============================================
-把房间里的一个文字频道的名称实时更新为美西太平洋时间（Pacific Time），格式：PT h:mm AM/PM
-（如 "PT 10:35 AM"，自动处理夏令时；可用 TIMEZONE 环境变量换成任意 IANA 时区）
+黑盒语音 · UTC 时间频道名自动更新机器人
+====================================
+把房间里的一个文字频道的名称实时更新为协调世界时（UTC），格式：UTC h:mm AM/PM
+（如 "UTC 10:35 PM"；可用 TIMEZONE 环境变量换成任意 IANA 时区）
 
 设计要点：
 - 零第三方依赖（只使用 Python 标准库 urllib），可直接跑在 GitHub Actions
@@ -20,8 +20,8 @@
     ROOM_ID        必填. 房间真实 ID（19 位数字）。注意：不是 6 位房间号！
                     用 --list-rooms 对照房间名查出真实 ID
     CHANNEL_ID     可选. 文字频道 ID。留空则尝试自动创建；自动创建失败时请手动创建后填入
-    CHANNEL_PREFIX 可选. 频道名前缀，默认 "PT"，最终频道名形如 "PT 10:35 AM"
-    TIMEZONE       可选. IANA 时区名，默认 "America/Los_Angeles"（美西太平洋时间，自动处理夏令时）
+    CHANNEL_PREFIX 可选. 频道名前缀，默认 "UTC"，最终频道名形如 "UTC 10:35 PM"
+    TIMEZONE       可选. IANA 时区名，默认 "UTC"（协调世界时，无夏令时）
     LOOP_MINUTES   可选. loop 模式运行分钟数，默认 350（必须小于 Actions job 的 6 小时上限）
 
 v2 改进：
@@ -63,11 +63,11 @@ QUERY = {
 TOKEN = os.environ.get("HEYBOX_TOKEN", "").strip()
 ROOM_ID = os.environ.get("ROOM_ID", "").strip()
 CHANNEL_ID = os.environ.get("CHANNEL_ID", "").strip()
-PREFIX = os.environ.get("CHANNEL_PREFIX", "PT").strip()
+PREFIX = os.environ.get("CHANNEL_PREFIX", "UTC").strip()
 LOOP_MINUTES = int(os.environ.get("LOOP_MINUTES", "350"))
 
-# 目标时区：默认美西洛杉矶（自动处理夏令时）。可设 TIMEZONE 覆盖为任意 IANA 时区。
-TZ_NAME = os.environ.get("TIMEZONE", "America/Los_Angeles").strip()
+# 目标时区：默认 UTC（协调世界时，无夏令时）。可设 TIMEZONE 覆盖为任意 IANA 时区。
+TZ_NAME = os.environ.get("TIMEZONE", "UTC").strip()
 if ZoneInfo is None:
     print("当前 Python 版本过低，无法使用 zoneinfo 时区库（需要 Python 3.9+），请升级", flush=True)
     sys.exit(1)
@@ -98,7 +98,7 @@ def api(path, method="GET", body=None):
 
 
 def now_hhmm():
-    """当前目标时区（默认美西洛杉矶）时间，12 小时制带 AM/PM，如 "10:35 AM"。
+    """当前目标时区（默认 UTC）时间，12 小时制带 AM/PM，如 "10:35 PM"。
     用 lstrip("0") 去前导零（%-I 在 Windows 的 strftime 下不受支持）"""
     return datetime.now(TZ).strftime("%I:%M %p").lstrip("0")
 
